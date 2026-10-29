@@ -1,0 +1,1 @@
+export const PROJECT_NAME = "Project Ticket_Rtc";

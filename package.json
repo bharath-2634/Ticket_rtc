@@ -1,0 +1,31 @@
+{
+  "name": "project-ticket-rtc",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others -n api,worker,dashboard \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:dashboard\"",
+    "dev:api": "npm run dev -w @ticket-rpc/api",
+    "dev:worker": "npm run dev -w @ticket-rpc/worker",
+    "dev:dashboard": "npm run dev -w @ticket-rpc/dashboard",
+    "build": "npm run build:backend && npm run build -w @ticket-rpc/dashboard",
+    "build:backend": "npm run build -w @ticket-rpc/shared && npm run build -w @ticket-rpc/api && npm run build -w @ticket-rpc/worker",
+    "check-types": "npm run build -w @ticket-rpc/shared && npm run check-types -w @ticket-rpc/shared && npm run check-types -w @ticket-rpc/api && npm run check-types -w @ticket-rpc/worker && npm run check-types -w @ticket-rpc/dashboard",
+    "docker:setup": "node scripts/docker-setup.mjs",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/supertest": "^6.0.3",
+    "concurrently": "^9.2.1",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
