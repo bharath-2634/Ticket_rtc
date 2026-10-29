@@ -82,13 +82,14 @@ app.post(
       }
 
       const { message_id: messageIdValue, text } = parsed.data;
+      const textCharacterCount = [...text].length;
       const rejectionReason =
         text.length === 0
           ? "text must not be empty"
           : text.trim().length === 0
             ? "text must not contain only whitespace"
-            : text.length > config.MAX_TICKET_TEXT_LENGTH
-              ? `text exceeds the maximum length of ${config.MAX_TICKET_TEXT_LENGTH} characters`
+            : textCharacterCount > config.MAX_TICKET_TEXT_LENGTH
+              ? `Text exceeds maximum allowed length of ${config.MAX_TICKET_TEXT_LENGTH} characters`
               : null;
 
       const client = await pool.connect();

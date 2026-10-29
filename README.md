@@ -31,7 +31,7 @@ Run all processes locally with `npm run dev`, or start only `npm run dev:api`, `
 }
 ```
 
-Both properties must be strings and additional properties are rejected. Empty text passes the input schema but is stored as a terminal `rejected` ticket with a reason (HTTP `422`). Whitespace-only and over-limit text are handled similarly. Valid input is committed to PostgreSQL before the API responds `202 Accepted` with a `pending` ticket.
+Both properties must be strings and additional properties are rejected. Empty text passes the input schema but is stored as a terminal `rejected` ticket with a reason (HTTP `422`). Whitespace-only and over-limit text are handled similarly. Ticket text may contain at most 24,000 Unicode code points (inclusive); surrogate-pair characters such as most emoji count as one code point. The effective limit is fixed in API configuration at 24,000, so a stale `MAX_TICKET_TEXT_LENGTH` environment override is ignored with a startup warning. The setting shown in `.env.example` documents the fixed limit. Valid input is committed to PostgreSQL before the API responds `202 Accepted` with a `pending` ticket.
 
 The original text is not trimmed, normalized, translated, or rewritten. The ticket table has a unique constraint on `message_id`; identical repeats return `200` with `duplicate: true` and the existing status, while a different payload for an existing ID returns `409`. Neither case changes the original ticket or its attempts. Invalid schemas return `400`; malformed JSON is `400`, unsupported media types are `415`, oversized bodies are `413`, and database errors do not yield success-shaped responses.
 
@@ -123,7 +123,7 @@ The runner submits the existing fixture over the HTTP ingestion endpoint and che
 
 ## Configuration
 
-Operational settings are documented in `.env.example`: `API_PORT`, `DATABASE_URL`, `DB_POOL_MAX`, `DB_IDLE_TIMEOUT_MS`, `DB_CONNECTION_TIMEOUT_MS`, `MAX_REQUEST_BODY_SIZE`, `MAX_TICKET_TEXT_LENGTH`, `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_PROCESSING_LEASE_MS`, `DB_RETRY_BASE_MS`, `DB_RETRY_MAX_MS`, `DASHBOARD_ORIGIN`, and `LOG_LEVEL`. Do not commit credentials.
+Operational settings are documented in `.env.example`: `API_PORT`, `DATABASE_URL`, `DB_POOL_MAX`, `DB_IDLE_TIMEOUT_MS`, `DB_CONNECTION_TIMEOUT_MS`, `MAX_REQUEST_BODY_SIZE`, `MAX_TICKET_TEXT_LENGTH` (fixed at 24,000; environment overrides are ignored), `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_PROCESSING_LEASE_MS`, `DB_RETRY_BASE_MS`, `DB_RETRY_MAX_MS`, `DASHBOARD_ORIGIN`, and `LOG_LEVEL`. Do not commit credentials.
 
 ## Docker Compose
 

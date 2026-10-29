@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const maxTicketTextLength = 24_000;
+
 const configSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -8,7 +10,7 @@ const configSchema = z.object({
     .url()
     .default("postgresql://ticket_rpc:ticket_rpc_dev@localhost:5432/ticket_rpc"),
   MAX_REQUEST_BODY_SIZE: z.string().default("1mb"),
-  MAX_TICKET_TEXT_LENGTH: z.coerce.number().int().positive().default(100_000),
+  MAX_TICKET_TEXT_LENGTH: z.coerce.number().int().positive().default(maxTicketTextLength),
   DASHBOARD_ORIGIN: z.string().default("http://localhost:5173"),
   LOG_LEVEL: z.string().default("info"),
   LLM_BASE_URL: z.string().url().default("https://6efd-219-65-111-226.ngrok-free.app"),
@@ -20,4 +22,14 @@ const configSchema = z.object({
   CLASSIFICATION_RETRY_MAX_MS: z.coerce.number().int().positive().default(10_000),
 });
 
-export const config = configSchema.parse(process.env);
+const parsedConfig = configSchema.parse(process.env);
+if (parsedConfig.MAX_TICKET_TEXT_LENGTH !== maxTicketTextLength) {
+  console.warn(
+    `MAX_TICKET_TEXT_LENGTH is fixed at ${maxTicketTextLength}; ignoring the configured value.`,
+  );
+}
+
+export const config = {
+  ...parsedConfig,
+  MAX_TICKET_TEXT_LENGTH: maxTicketTextLength,
+};

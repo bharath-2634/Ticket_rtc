@@ -85,13 +85,10 @@ describe("ticket ingestion with PostgreSQL", () => {
     for (const [name, text] of [
       ["empty", ""],
       ["spaces", " \t "],
-      ["too-long", "x".repeat(100_001)],
     ] as const) {
       const result = await request(app).post("/api/v1/tickets").send({ message_id: id(name), text });
       expect(result.status).toBe(422);
-      expect(result.body.rejection_reason).toMatch(
-        name === "too-long" ? /maximum length/ : /empty|whitespace/,
-      );
+      expect(result.body.rejection_reason).toMatch(/empty|whitespace/);
       const stored = await pool.query("SELECT status, rejection_reason FROM tickets WHERE message_id = $1", [id(name)]);
       expect(stored.rows[0].status).toBe("rejected");
       expect(stored.rows[0].rejection_reason).toBeTruthy();
@@ -101,6 +98,71 @@ describe("ticket ingestion with PostgreSQL", () => {
         [id(name)],
       )).rows[0].count).toBe(0);
     }
+  });
+
+  it("counts Unicode code points and rejects text only when it exceeds 24,000 characters", async () => {
+    const exactlyLimit = "😀".repeat(24_000);
+    const overLimit = "😀".repeat(24_001);
+    expect(exactlyLimit.length).toBe(48_000);
+    expect([...exactlyLimit]).toHaveLength(24_000);
+
+    const accepted = await request(app)
+      .post("/api/v1/tickets")
+      .send({ message_id: id("length-limit"), text: exactlyLimit });
+    expect(accepted.status).toBe(202);
+    const acceptedTicket = await pool.query(
+      `SELECT t.original_text, t.status, c.status AS classification_status
+       FROM tickets t JOIN ticket_classifications c ON c.ticket_id = t.id
+       WHERE t.message_id = $1`,
+      [id("length-limit")],
+    );
+    expect(acceptedTicket.rows[0]).toEqual({
+      original_text: exactlyLimit,
+      status: "pending",
+      classification_status: "pending",
+    });
+
+    const rejected = await request(app)
+      .post("/api/v1/tickets")
+      .send({ message_id: id("over-limit"), text: overLimit });
+    expect(rejected.status).toBe(422);
+    expect(rejected.body).toMatchObject({
+      status: "rejected",
+      rejection_reason: "Text exceeds maximum allowed length of 24000 characters",
+    });
+
+    const stored = await pool.query(
+      `SELECT t.original_text, t.status, t.rejection_reason,
+              count(c.ticket_id)::int AS classification_checkpoints
+       FROM tickets t
+       LEFT JOIN ticket_classifications c ON c.ticket_id = t.id
+       WHERE t.message_id = $1
+       GROUP BY t.id`,
+      [id("over-limit")],
+    );
+    expect(stored.rows[0]).toEqual({
+      original_text: overLimit,
+      status: "rejected",
+      rejection_reason: "Text exceeds maximum allowed length of 24000 characters",
+      classification_checkpoints: 0,
+    });
+
+    const detail = await request(app).get(`/api/v1/tickets/${id("over-limit")}`);
+    expect(detail.body.ticket).toMatchObject({
+      status: "rejected",
+      rejection_reason: "Text exceeds maximum allowed length of 24000 characters",
+    });
+    expect(detail.body.events).toContainEqual(
+      expect.objectContaining({
+        event_type: "rejected",
+        reason: "Text exceeds maximum allowed length of 24000 characters",
+      }),
+    );
+    expect((await pool.query(
+      `SELECT count(*)::int AS count FROM classification_attempts a
+       JOIN tickets t ON t.id = a.ticket_id WHERE t.message_id = $1`,
+      [id("over-limit")],
+    )).rows[0].count).toBe(0);
   });
 
   it("handles invalid bodies and persists request events without creating tickets", async () => {
