@@ -12,3 +12,6 @@
 - **Tickets and ingestion events are separate tables:** ticket identity and status remain stable while rejection, duplicate, conflict, and worker-recovery history remains observable.
 - **Worker leases and `SKIP LOCKED`:** claims are transactional and concurrent-safe; expired leases are recovered. This phase intentionally does not mark processing completed because no business processor exists yet.
 - **Dashboard polling:** bounded API polling every five seconds avoids unnecessary SSE infrastructure; all displayed state comes from PostgreSQL-backed API endpoints.
+- **LLM integration:** use the supplied OpenAI-compatible chat-completions API and model through environment configuration. A strict JSON/Zod contract rejects malformed, explanatory, or unknown category results rather than guessing.
+- **Durable classification checkpoint:** `ticket_classifications` and `classification_attempts` separate durable stage completion from overall ticket completion. The category and stage state commit together, so successful classification is reused after restart.
+- **Three-failure classification retry:** failed calls are recorded individually with exponential backoff; the ticket fails after three attempts per retry cycle. Operator retry resets the cycle count while preserving the total LLM-call ledger.

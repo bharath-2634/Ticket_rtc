@@ -1,6 +1,6 @@
 # Project Kestrel — ingestion phase
 
-Project Kestrel is an npm-workspace modular monolith. This phase implements durable customer-message ingestion, an operational ticket API and dashboard, and a PostgreSQL-backed worker lifecycle. Classification, extraction, and LLM integration are intentionally not implemented.
+Project Kestrel is an npm-workspace modular monolith. It implements durable customer-message ingestion and LLM-based ticket classification with PostgreSQL checkpoints. Product extraction, order-ID extraction, requested-action extraction, and final ticket completion are not implemented.
 
 ## Requirements and setup
 
@@ -16,7 +16,7 @@ docker compose up -d postgres
 npm run db:migrate
 ```
 
-Run all processes locally with `npm run dev`, or start only `npm run dev:api`, `npm run dev:worker`, or `npm run dev:dashboard`. The API and worker apply versioned migrations during startup; the worker uses bounded backoff when PostgreSQL is unavailable.
+Run all processes locally with `npm run dev`, or start only `npm run dev:api`, `npm run dev:worker`, or `npm run dev:dashboard`. The API and worker apply versioned migrations during startup; the worker uses bounded backoff when PostgreSQL is unavailable. Before starting the worker, verify `LLM_BASE_URL` and `LLM_MODEL` in `.env`; `.env.example` contains the supplied ngrok endpoint and `qwen3-4b` model as defaults.
 
 ## Ingestion API
 
@@ -53,9 +53,17 @@ Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/v1/tickets `
 
 Summary definitions: `valid_tickets_received` is the current count of tickets not rejected; `pending`, `processing`, `completed`, and `failed` are ticket status counts; `rejected_tickets` counts persisted rejected tickets; `rejected_requests` counts rejected tickets plus schema-invalid requests; `duplicate_submissions`, `payload_conflicts`, and `ingestion_errors` count their respective persisted events. Duplicate requests do not increase valid-ticket counts.
 
+Classification counters are persisted-state aggregates: `classification_pending`, `classification_in_progress`, `classification_completed`, and `classification_failed` count stage checkpoint states; `classification_calls` counts recorded outbound LLM attempts; `classification_successes` and `classification_call_failures` count successful and failed responses; `classification_retries` counts call numbers greater than one for the same ticket. `llm_configured` indicates that the API process has an endpoint and model configured; it is not a live health probe.
+
 ## Worker behavior
 
-The worker claims `pending` tickets transactionally with `FOR UPDATE SKIP LOCKED`, increments the attempt counter only when claiming, and sets a lease. Expired `processing` leases are recorded as recovery events, returned to `pending`, and eligible for a later claim. Rejected tickets are not eligible. The ingestion-phase worker intentionally leaves claims in `processing`; it does not mark them completed or fabricate classification/extraction output. Stop it when testing for all fixture tickets to remain pending.
+The worker claims `pending` tickets transactionally with `FOR UPDATE SKIP LOCKED`, increments ticket processing attempts on claim, and sets a renewable lease. It calls the configured OpenAI-compatible `POST {LLM_BASE_URL}/v1/chat/completions` endpoint using the configured model and the `ngrok-skip-browser-warning` header. The API key is optional and is sent only when configured as a Bearer token. The system prompt asks for exactly `{"category":"..."}` using `Billing`, `Technical issue`, `Account access`, `Refund`, or `Other`; the response must be valid JSON with exactly one field and an allowed category.
+
+Each outbound LLM call and its state is recorded in `classification_attempts`. A separate `ticket_classifications` row stores the durable checkpoint. Successful results are committed transactionally before a ticket leaves the leased worker stage; an already-completed checkpoint is never called again. Database write failures after a valid LLM response are retried without another model request. The worker does not claim exactly-once calls across a crash between the remote response and local commit.
+
+The default maximum is three failed classification calls per retry cycle. Failed calls are persisted, with exponential backoff; after the third, the ticket and classification stage become `failed`. The existing operator retry endpoint resets only the current classification retry-cycle count, retains cumulative LLM call history, and requeues the same ticket. Ticket `attempts` counts worker claims; checkpoint `attempts` counts calls in the current retry cycle; `llm_calls` and the attempt ledger are cumulative. A successful classification leaves the ticket `processing` (not `completed`) for future pipeline stages. Expired leases recover unfinished work; rejected tickets never receive a classification checkpoint.
+
+Relevant environment settings: `LLM_BASE_URL`, `LLM_MODEL`, optional `LLM_API_KEY`, `LLM_TIMEOUT_MS`, `CLASSIFICATION_MAX_ATTEMPTS`, `CLASSIFICATION_RETRY_BASE_MS`, and `CLASSIFICATION_RETRY_MAX_MS`. `LLM_BASE_URL` is the server base URL, with or without a trailing `/v1`.
 
 ## Dashboard
 
@@ -98,6 +106,20 @@ npm run build
 ```
 
 The PostgreSQL integration tests use the configured local `DATABASE_URL` (default: the Compose development database), apply migrations, and clean up only rows tagged with their unique test run ID. Start PostgreSQL before running the full suite. Schema tests do not require a database.
+
+To test the configured LLM independently without submitting a customer ticket:
+
+```powershell
+npm run llm:smoke
+```
+
+For a complete local dataset run, start PostgreSQL and the API, verify the `.env` model endpoint, then start the worker and run:
+
+```powershell
+npm run dataset:classify
+```
+
+The runner submits the existing fixture over the HTTP ingestion endpoint and checks the resulting database classifications. Stop the worker with Ctrl+C to pause additional model requests. The LLM call costs/timeouts are controlled by the local endpoint and `LLM_TIMEOUT_MS`. The automated PostgreSQL integration suite uses a deterministic local HTTP mock and exercises the same LLM client and worker persistence flow without sending fixture text to the live model.
 
 ## Configuration
 

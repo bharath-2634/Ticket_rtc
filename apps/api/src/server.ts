@@ -7,6 +7,7 @@ import { config } from "./config.js";
 
 const logger = pino({ level: config.LOG_LEVEL });
 const server = createServer(app);
+let shuttingDown = false;
 
 try {
   await runMigrations();
@@ -20,6 +21,8 @@ try {
 }
 
 const shutdown = (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info({ signal }, "API shutting down");
   server.close((error) => {
     if (error) {

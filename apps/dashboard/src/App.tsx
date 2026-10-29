@@ -10,6 +10,13 @@ type Ticket = {
   created_at: string;
   updated_at: string;
   last_error: string | null;
+  classification_status: string | null;
+  classification_category: string | null;
+  classification_attempts: number | null;
+  classification_llm_calls: number | null;
+  classification_started_at: string | null;
+  classification_completed_at: string | null;
+  classification_error: string | null;
 };
 
 type Event = {
@@ -20,7 +27,7 @@ type Event = {
   created_at: string;
 };
 
-type Summary = Record<string, number>;
+type Operations = Record<string, number | boolean> & { llm_configured: boolean };
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 const pageSize = 10;
 
@@ -31,7 +38,7 @@ function timestamp(value: string) {
 export function App() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
-  const [summary, setSummary] = useState<Summary>({});
+  const [summary, setSummary] = useState<Operations>({ llm_configured: false });
   const [page, setPage] = useState(1);
   const [health, setHealth] = useState("Connecting");
   const [error, setError] = useState("");
@@ -55,7 +62,7 @@ export function App() {
       ]);
       setTickets(ticketData.tickets as Ticket[]);
       setEvents(eventData.events as Event[]);
-      setSummary(summaryData as Summary);
+      setSummary(summaryData as Operations);
       setHealth(healthResponse.ok ? "API and database ready" : "Database unavailable");
       setError("");
     } catch (reason) {
@@ -97,6 +104,12 @@ export function App() {
           ["Duplicates", "duplicate_submissions"],
           ["Conflicts", "payload_conflicts"],
           ["Ingestion errors", "ingestion_errors"],
+          ["Classify pending", "classification_pending"],
+          ["Classifying", "classification_in_progress"],
+          ["Classified", "classification_completed"],
+          ["Classification failed", "classification_failed"],
+          ["LLM calls", "classification_calls"],
+          ["LLM retries", "classification_retries"],
         ].map(([label, key]) => (
           <article className="metric" key={key}>
             <span>{label}</span>
@@ -129,6 +142,29 @@ export function App() {
                   <p className="ticket-text">{ticket.original_text || <span className="muted">[empty message]</span>}</p>
                   {(ticket.rejection_reason || ticket.last_error) &&
                     <p className="reason">{ticket.rejection_reason ?? ticket.last_error}</p>}
+                  {ticket.status !== "rejected" && (
+                    <div className="classification">
+                      <span>
+                        Classification: <strong>{ticket.classification_status ?? "not queued"}</strong>
+                      </span>
+                      {ticket.classification_category && (
+                        <span>Category: <strong>{ticket.classification_category}</strong></span>
+                      )}
+                      {ticket.classification_attempts !== null && (
+                        <span>
+                          Attempts {ticket.classification_attempts}
+                          {ticket.classification_llm_calls !== null &&
+                            ` · LLM calls ${ticket.classification_llm_calls}`}
+                        </span>
+                      )}
+                      {ticket.classification_error && (
+                        <p className="reason">{ticket.classification_error}</p>
+                      )}
+                      {ticket.classification_completed_at && (
+                        <span>Classified {timestamp(ticket.classification_completed_at)}</span>
+                      )}
+                    </div>
+                  )}
                   <div className="ticket-meta">
                     <span>Received {timestamp(ticket.created_at)}</span>
                     <span>Updated {timestamp(ticket.updated_at)}</span>
@@ -161,6 +197,9 @@ export function App() {
           </div>
         )}
       </section>
+      <p className="muted llm-status">
+        LLM endpoint: {summary.llm_configured ? "configured (availability is checked during classification)" : "not configured"}
+      </p>
     </main>
   );
 }
