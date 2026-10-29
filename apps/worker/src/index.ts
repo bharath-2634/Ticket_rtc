@@ -2,7 +2,7 @@ import pino from "pino";
 import { PROJECT_NAME } from "@ticket-rpc/shared";
 import { pool, runMigrations } from "@ticket-rpc/shared/database";
 import { OpenAiCompatibleLlmClient } from "./llm-client.js";
-import { classifyClaimedTicket, pollAndClaim } from "./worker.js";
+import { classifyClaimedTicket, extractClaimedTicket, pollAndClaim } from "./worker.js";
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 pool.on("error", (error) => {
@@ -25,6 +25,9 @@ const retryMaxMs = integerSetting("DB_RETRY_MAX_MS", 30_000);
 const classificationMaxAttempts = integerSetting("CLASSIFICATION_MAX_ATTEMPTS", 3);
 const classificationRetryBaseMs = integerSetting("CLASSIFICATION_RETRY_BASE_MS", 1_000);
 const classificationRetryMaxMs = integerSetting("CLASSIFICATION_RETRY_MAX_MS", 10_000);
+const extractionMaxAttempts = integerSetting("EXTRACTION_MAX_ATTEMPTS", 3);
+const extractionRetryBaseMs = integerSetting("EXTRACTION_RETRY_BASE_MS", 1_000);
+const extractionRetryMaxMs = integerSetting("EXTRACTION_RETRY_MAX_MS", 10_000);
 const llm = new OpenAiCompatibleLlmClient({
   baseUrl: process.env.LLM_BASE_URL ?? "https://6efd-219-65-111-226.ngrok-free.app",
   model: process.env.LLM_MODEL ?? "qwen3-4b",
@@ -67,20 +70,24 @@ async function run() {
         );
       }
       for (const ticket of result.claimed) {
-        const job = classifyClaimedTicket(
-          pool,
-          llm,
-          ticket,
-          {
-            maxAttempts: classificationMaxAttempts,
-            retryBaseMs: classificationRetryBaseMs,
-            retryMaxMs: classificationRetryMaxMs,
-            leaseMs,
-          },
-          logger,
-        )
+        const classificationOptions = {
+          maxAttempts: classificationMaxAttempts,
+          retryBaseMs: classificationRetryBaseMs,
+          retryMaxMs: classificationRetryMaxMs,
+          leaseMs,
+        };
+        const extractionOptions = {
+          maxAttempts: extractionMaxAttempts,
+          retryBaseMs: extractionRetryBaseMs,
+          retryMaxMs: extractionRetryMaxMs,
+          leaseMs,
+        };
+        const stage = ticket.classification_status !== "completed"
+          ? classifyClaimedTicket(pool, llm, ticket, classificationOptions, logger)
+          : extractClaimedTicket(pool, llm, ticket, extractionOptions, logger);
+        const job = stage
           .catch((error: unknown) => {
-            logger.error({ err: error, messageId: ticket.message_id }, "Classification worker failed");
+            logger.error({ err: error, messageId: ticket.message_id }, "Ticket processing worker failed");
           })
           .finally(() => activeJobs.delete(ticket.id));
         activeJobs.set(ticket.id, job);

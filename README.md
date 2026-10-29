@@ -1,6 +1,6 @@
-# Project Kestrel — ingestion phase
+# Project Kestrel — ticket processing pipeline
 
-Project Kestrel is an npm-workspace modular monolith. It implements durable customer-message ingestion and LLM-based ticket classification with PostgreSQL checkpoints. Product extraction, order-ID extraction, requested-action extraction, and final ticket completion are not implemented.
+Project Kestrel is an npm-workspace modular monolith. It implements durable customer-message ingestion, LLM-based ticket classification and structured extraction, PostgreSQL checkpoints, and a database-backed results export.
 
 ## Requirements and setup
 
@@ -53,7 +53,7 @@ Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/v1/tickets `
 
 Summary definitions: `valid_tickets_received` is the current count of tickets not rejected; `pending`, `processing`, `completed`, and `failed` are ticket status counts; `rejected_tickets` counts persisted rejected tickets; `rejected_requests` counts rejected tickets plus schema-invalid requests; `duplicate_submissions`, `payload_conflicts`, and `ingestion_errors` count their respective persisted events. Duplicate requests do not increase valid-ticket counts.
 
-Classification counters are persisted-state aggregates: `classification_pending`, `classification_in_progress`, `classification_completed`, and `classification_failed` count stage checkpoint states; `classification_calls` counts recorded outbound LLM attempts; `classification_successes` and `classification_call_failures` count successful and failed responses; `classification_retries` counts call numbers greater than one for the same ticket. `llm_configured` indicates that the API process has an endpoint and model configured; it is not a live health probe.
+Classification and extraction counters are persisted-state aggregates. `classification_pending`, `classification_in_progress`, `classification_completed`, and `classification_failed` and their `extraction_*` equivalents count checkpoint states. The corresponding `*_calls` count recorded outbound LLM attempts; `*_successes` and `*_call_failures` count successful and failed responses; `*_retries` count calls after the first for each ticket. `llm_configured` indicates that the API process has an endpoint and model configured; it is not a live health probe.
 
 ## Worker behavior
 
@@ -61,9 +61,9 @@ The worker claims `pending` tickets transactionally with `FOR UPDATE SKIP LOCKED
 
 Each outbound LLM call and its state is recorded in `classification_attempts`. A separate `ticket_classifications` row stores the durable checkpoint. Successful results are committed transactionally before a ticket leaves the leased worker stage; an already-completed checkpoint is never called again. Database write failures after a valid LLM response are retried without another model request. The worker does not claim exactly-once calls across a crash between the remote response and local commit.
 
-The default maximum is three failed classification calls per retry cycle. Failed calls are persisted, with exponential backoff; after the third, the ticket and classification stage become `failed`. The existing operator retry endpoint resets only the current classification retry-cycle count, retains cumulative LLM call history, and requeues the same ticket. Ticket `attempts` counts worker claims; checkpoint `attempts` counts calls in the current retry cycle; `llm_calls` and the attempt ledger are cumulative. A successful classification leaves the ticket `processing` (not `completed`) for future pipeline stages. Expired leases recover unfinished work; rejected tickets never receive a classification checkpoint.
+The default maximum is three failed classification calls per retry cycle. Failed calls are persisted, with exponential backoff; after the third, the ticket and classification stage become `failed`. The existing operator retry endpoint resets only the current classification retry-cycle count, retains cumulative LLM call history, and requeues the same ticket. Ticket `attempts` counts worker claims; checkpoint `attempts` counts calls in the current retry cycle; `llm_calls` and the attempt ledger are cumulative. A successful classification leaves the ticket `processing` while the worker proceeds to extraction. Extraction uses the same configured OpenAI-compatible endpoint and model, with the saved category and original message as context. It requires exactly four JSON fields: `order_id`, `product`, `urgency`, and `requested_action`. Missing/unsupported values must be `null` (urgency is always `Low`, `Medium`, or `High`); order IDs are checked against the original text and products normalize only against the documented catalogue/aliases. Extraction results are persisted as a separate checkpoint; the ticket is marked `completed` only after extraction succeeds. Classification checkpoints are not repeated when extraction fails. Expired leases recover unfinished stages; rejected tickets receive neither checkpoint.
 
-Relevant environment settings: `LLM_BASE_URL`, `LLM_MODEL`, optional `LLM_API_KEY`, `LLM_TIMEOUT_MS`, `CLASSIFICATION_MAX_ATTEMPTS`, `CLASSIFICATION_RETRY_BASE_MS`, and `CLASSIFICATION_RETRY_MAX_MS`. `LLM_BASE_URL` is the server base URL, with or without a trailing `/v1`.
+Each stage records attempts and applies bounded exponential backoff; the default maximum is three failed calls per retry cycle. Operator retries restart only the failed stage's retry-cycle count and preserve the cumulative call ledger. Relevant settings: `LLM_BASE_URL`, `LLM_MODEL`, optional `LLM_API_KEY`, `LLM_TIMEOUT_MS`, `CLASSIFICATION_MAX_ATTEMPTS`, `CLASSIFICATION_RETRY_BASE_MS`, `CLASSIFICATION_RETRY_MAX_MS`, `EXTRACTION_MAX_ATTEMPTS`, `EXTRACTION_RETRY_BASE_MS`, and `EXTRACTION_RETRY_MAX_MS`. `LLM_BASE_URL` is the server base URL, with or without a trailing `/v1`.
 
 ## Dashboard
 
@@ -113,13 +113,13 @@ To test the configured LLM independently without submitting a customer ticket:
 npm run llm:smoke
 ```
 
-For a complete local dataset run, start PostgreSQL and the API, verify the `.env` model endpoint, then start the worker and run:
+For a complete local dataset run, start PostgreSQL, apply migrations (API and worker also migrate during startup), and start the API and worker with the `.env` model endpoint configured. Then run:
 
 ```powershell
 npm run dataset:classify
 ```
 
-The runner submits the existing fixture over the HTTP ingestion endpoint and checks the resulting database classifications. Stop the worker with Ctrl+C to pause additional model requests. The LLM call costs/timeouts are controlled by the local endpoint and `LLM_TIMEOUT_MS`. The automated PostgreSQL integration suite uses a deterministic local HTTP mock and exercises the same LLM client and worker persistence flow without sending fixture text to the live model.
+The runner submits the fixture through HTTP, waits for terminal ticket states, verifies the expected accepted/rejected/duplicate counts and stage completion, then writes `results.json` from PostgreSQL. The export contains exactly `message_id`, `status`, `category`, `order_id`, `product`, `urgency`, and `requested_action`; it uses an atomic temporary-file replacement. To export persisted state separately, run `npm run results:export -- .\results.json`. The LLM call costs/timeouts are controlled by the endpoint and `LLM_TIMEOUT_MS`. The PostgreSQL integration suite uses a deterministic local HTTP mock and exercises the same client and worker flow without sending fixture text to the live model.
 
 ## Configuration
 

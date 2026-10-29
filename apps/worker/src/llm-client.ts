@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  extractionInstructions,
+  parseExtraction,
+  type ExtractionResult,
+} from "./extraction.js";
 
 export const classificationCategories = [
   "Billing",
@@ -90,6 +95,76 @@ export class OpenAiCompatibleLlmClient {
       ? `${base}/chat/completions`
       : `${base}/v1/chat/completions`;
     this.fetchImplementation = fetchImplementation;
+  }
+
+  get modelName() {
+    return this.config.model;
+  }
+
+  private async extractionCompletion(text: string, category: ClassificationCategory) {
+    let response: Response;
+    try {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      };
+      if (this.config.apiKey) {
+        headers.authorization = `\u0042earer ${this.config.apiKey}`;
+      }
+      response = await this.fetchImplementation(this.endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: this.config.model,
+          messages: [
+            { role: "system", content: extractionInstructions },
+            {
+              role: "user",
+              content: JSON.stringify({
+                persisted_category: category,
+                original_customer_message: text,
+              }),
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(this.config.timeoutMs),
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new ClassificationError("The LLM request timed out.", "llm_timeout", { cause: error });
+      }
+      throw new ClassificationError("The LLM endpoint could not be reached.", "llm_connection_error", {
+        cause: error,
+      });
+    }
+
+    if (!response.ok) {
+      throw new ClassificationError(
+        `The LLM endpoint returned HTTP ${response.status}.`,
+        "llm_http_error",
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw new ClassificationError("The LLM response body was not valid JSON.", "llm_malformed_response", {
+        cause: error,
+      });
+    }
+    const parsedBody = chatCompletionSchema.safeParse(body);
+    if (!parsedBody.success) {
+      throw new ClassificationError(
+        "The LLM response did not contain a chat completion.",
+        "llm_malformed_response",
+      );
+    }
+    return parseExtraction(parsedBody.data.choices[0].message.content, text);
+  }
+
+  async extract(text: string, category: ClassificationCategory): Promise<ExtractionResult> {
+    return this.extractionCompletion(text, category);
   }
 
   async classify(text: string): Promise<ClassificationCategory> {

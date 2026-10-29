@@ -120,6 +120,10 @@ app.post(
               "INSERT INTO ticket_classifications (ticket_id, status) VALUES ($1, 'pending')",
               [ticket.id],
             );
+            await client.query(
+              "INSERT INTO ticket_extractions (ticket_id, status) VALUES ($1, 'pending')",
+              [ticket.id],
+            );
           }
           await client.query(
             "INSERT INTO ingestion_events (message_id, event_type, reason) VALUES ($1, $2, $3)",
@@ -204,9 +208,14 @@ app.get("/api/v1/tickets", async (request, response, next) => {
               c.status AS classification_status, c.category AS classification_category,
               c.attempts AS classification_attempts, c.llm_calls AS classification_llm_calls,
               c.started_at AS classification_started_at, c.completed_at AS classification_completed_at,
-              c.last_error AS classification_error
+              c.last_error AS classification_error,
+              x.status AS extraction_status, x.order_id, x.product, x.urgency, x.requested_action,
+              x.attempts AS extraction_attempts, x.llm_calls AS extraction_llm_calls,
+              x.started_at AS extraction_started_at, x.completed_at AS extraction_completed_at,
+              x.last_error AS extraction_error
        FROM tickets t
        LEFT JOIN ticket_classifications c ON c.ticket_id = t.id
+       LEFT JOIN ticket_extractions x ON x.ticket_id = t.id
        ${filter}
        ORDER BY t.created_at DESC, t.id DESC
        LIMIT $${values.length - 1} OFFSET $${values.length}`,
@@ -226,8 +235,14 @@ app.get("/api/v1/tickets/:messageId", async (request, response, next) => {
               c.status AS classification_status, c.category AS classification_category,
               c.attempts AS classification_attempts, c.llm_calls AS classification_llm_calls,
               c.started_at AS classification_started_at, c.completed_at AS classification_completed_at,
-              c.last_error AS classification_error
-       FROM tickets t LEFT JOIN ticket_classifications c ON c.ticket_id = t.id
+              c.last_error AS classification_error,
+              x.status AS extraction_status, x.order_id, x.product, x.urgency, x.requested_action,
+              x.attempts AS extraction_attempts, x.llm_calls AS extraction_llm_calls,
+              x.started_at AS extraction_started_at, x.completed_at AS extraction_completed_at,
+              x.last_error AS extraction_error
+       FROM tickets t
+       LEFT JOIN ticket_classifications c ON c.ticket_id = t.id
+       LEFT JOIN ticket_extractions x ON x.ticket_id = t.id
        WHERE t.message_id = $1`,
       [request.params.messageId],
     );
@@ -252,8 +267,11 @@ app.post("/api/v1/tickets/:messageId/retry", async (request, response, next) => 
   try {
     await client.query("BEGIN");
     const current = await client.query(
-      `SELECT t.id, t.status, c.status AS classification_status
-       FROM tickets t LEFT JOIN ticket_classifications c ON c.ticket_id = t.id
+      `SELECT t.id, t.status, c.status AS classification_status,
+              x.status AS extraction_status
+       FROM tickets t
+       LEFT JOIN ticket_classifications c ON c.ticket_id = t.id
+       LEFT JOIN ticket_extractions x ON x.ticket_id = t.id
        WHERE t.message_id = $1 FOR UPDATE OF t`,
       [request.params.messageId],
     );
@@ -262,17 +280,31 @@ app.post("/api/v1/tickets/:messageId/retry", async (request, response, next) => 
       response.status(404).json({ error: "ticket_not_found" });
       return;
     }
-    if (current.rows[0].status !== "failed" || current.rows[0].classification_status !== "failed") {
+    const retryClassification = current.rows[0].classification_status === "failed";
+    const retryExtraction = current.rows[0].extraction_status === "failed";
+    if (
+      current.rows[0].status !== "failed" ||
+      (!retryClassification && !retryExtraction)
+    ) {
       await client.query("ROLLBACK");
       response.status(409).json({ error: "ticket_not_retryable", status: current.rows[0].status });
       return;
     }
-    await client.query(
-      `UPDATE ticket_classifications SET status = 'pending', attempts = 0,
-         next_attempt_at = now(), updated_at = now(), last_error = NULL
-       WHERE ticket_id = $1 AND status = 'failed'`,
-      [current.rows[0].id],
-    );
+    if (retryClassification) {
+      await client.query(
+        `UPDATE ticket_classifications SET status = 'pending', attempts = 0,
+           next_attempt_at = now(), updated_at = now(), last_error = NULL
+         WHERE ticket_id = $1 AND status = 'failed'`,
+        [current.rows[0].id],
+      );
+    } else {
+      await client.query(
+        `UPDATE ticket_extractions SET status = 'pending', attempts = 0,
+           next_attempt_at = now(), updated_at = now(), last_error = NULL
+         WHERE ticket_id = $1 AND status = 'failed'`,
+        [current.rows[0].id],
+      );
+    }
     const result = await client.query(
       `UPDATE tickets SET status = 'pending', updated_at = now(), last_error = NULL
        WHERE id = $1 AND status = 'failed'
@@ -281,7 +313,10 @@ app.post("/api/v1/tickets/:messageId/retry", async (request, response, next) => 
     );
     await client.query(
       "INSERT INTO ingestion_events (message_id, event_type, reason) VALUES ($1, 'retry_requested', $2)",
-      [request.params.messageId, "operator requested retry"],
+      [
+        request.params.messageId,
+        retryClassification ? "operator requested classification retry" : "operator requested extraction retry",
+      ],
     );
     await client.query("COMMIT");
     response.status(202).json(result.rows[0]);
@@ -329,11 +364,29 @@ app.get("/api/v1/ops/summary", async (_request, response, next) => {
         count(*) FILTER (WHERE call_number > 1)::int AS classification_retries
       FROM classification_attempts
     `);
+    const extraction = await pool.query(`
+      SELECT
+        count(*) FILTER (WHERE status = 'pending')::int AS extraction_pending,
+        count(*) FILTER (WHERE status = 'in_progress')::int AS extraction_in_progress,
+        count(*) FILTER (WHERE status = 'completed')::int AS extraction_completed,
+        count(*) FILTER (WHERE status = 'failed')::int AS extraction_failed
+      FROM ticket_extractions
+    `);
+    const extractionCalls = await pool.query(`
+      SELECT
+        count(*)::int AS extraction_calls,
+        count(*) FILTER (WHERE status = 'succeeded')::int AS extraction_successes,
+        count(*) FILTER (WHERE status = 'failed')::int AS extraction_call_failures,
+        count(*) FILTER (WHERE call_number > 1)::int AS extraction_retries
+      FROM extraction_attempts
+    `);
     response.json({
       ...result.rows[0],
       ...events.rows[0],
       ...classification.rows[0],
       ...classificationCalls.rows[0],
+      ...extraction.rows[0],
+      ...extractionCalls.rows[0],
       llm_configured: Boolean(process.env.LLM_BASE_URL && process.env.LLM_MODEL),
     });
   } catch (error) {

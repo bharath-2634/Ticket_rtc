@@ -17,6 +17,16 @@ type Ticket = {
   classification_started_at: string | null;
   classification_completed_at: string | null;
   classification_error: string | null;
+  extraction_status: string | null;
+  order_id: string | null;
+  product: string | null;
+  urgency: string | null;
+  requested_action: string | null;
+  extraction_attempts: number | null;
+  extraction_llm_calls: number | null;
+  extraction_started_at: string | null;
+  extraction_completed_at: string | null;
+  extraction_error: string | null;
 };
 
 type Event = {
@@ -110,6 +120,12 @@ export function App() {
           ["Classification failed", "classification_failed"],
           ["LLM calls", "classification_calls"],
           ["LLM retries", "classification_retries"],
+          ["Extract pending", "extraction_pending"],
+          ["Extracting", "extraction_in_progress"],
+          ["Extracted", "extraction_completed"],
+          ["Extraction failed", "extraction_failed"],
+          ["Extraction calls", "extraction_calls"],
+          ["Extraction retries", "extraction_retries"],
         ].map(([label, key]) => (
           <article className="metric" key={key}>
             <span>{label}</span>
@@ -143,6 +159,7 @@ export function App() {
                   {(ticket.rejection_reason || ticket.last_error) &&
                     <p className="reason">{ticket.rejection_reason ?? ticket.last_error}</p>}
                   {ticket.status !== "rejected" && (
+                    <>
                     <div className="classification">
                       <span>
                         Classification: <strong>{ticket.classification_status ?? "not queued"}</strong>
@@ -164,6 +181,37 @@ export function App() {
                         <span>Classified {timestamp(ticket.classification_completed_at)}</span>
                       )}
                     </div>
+                    <div className="extraction">
+                      <div className="extraction-heading">
+                        <strong>Extraction</strong>
+                        <span className={`badge ${ticket.extraction_status ?? "pending"}`}>
+                          {ticket.extraction_status ?? "not queued"}
+                        </span>
+                      </div>
+                      <div className="extraction-fields">
+                        <span>Order ID: <strong>{ticket.order_id ?? "Not provided"}</strong></span>
+                        <span>Product: <strong>{ticket.product ?? "Not provided"}</strong></span>
+                        <span>Urgency: <strong>{ticket.urgency ?? "Not available"}</strong></span>
+                        <span>Requested action: <strong>{ticket.requested_action ?? "No clear action"}</strong></span>
+                        {ticket.extraction_attempts !== null && (
+                          <span>
+                            Attempts {ticket.extraction_attempts}
+                            {ticket.extraction_llm_calls !== null &&
+                              ` · LLM calls ${ticket.extraction_llm_calls}`}
+                          </span>
+                        )}
+                        {ticket.extraction_started_at && (
+                          <span>Started {timestamp(ticket.extraction_started_at)}</span>
+                        )}
+                        {ticket.extraction_completed_at && (
+                          <span>Extracted {timestamp(ticket.extraction_completed_at)}</span>
+                        )}
+                      </div>
+                      {ticket.extraction_error && (
+                        <p className="reason">{ticket.extraction_error}</p>
+                      )}
+                    </div>
+                    </>
                   )}
                   <div className="ticket-meta">
                     <span>Received {timestamp(ticket.created_at)}</span>

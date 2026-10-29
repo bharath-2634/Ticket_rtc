@@ -1,0 +1,218 @@
+[
+  {
+    "message_id": "T-1001",
+    "status": "completed",
+    "category": "Billing",
+    "order_id": "ORD-48213",
+    "product": "Aura Smart Watch",
+    "urgency": "Medium",
+    "requested_action": "correct the invoice"
+  },
+  {
+    "message_id": "T-1002",
+    "status": "completed",
+    "category": "Refund",
+    "order_id": "ORD-51027",
+    "product": "Pulse Earbuds",
+    "urgency": "Medium",
+    "requested_action": "Process the refund"
+  },
+  {
+    "message_id": "T-1003",
+    "status": "completed",
+    "category": "Technical issue",
+    "order_id": "ORD-39920",
+    "product": "Nimbus Router X2",
+    "urgency": "Medium",
+    "requested_action": null
+  },
+  {
+    "message_id": "T-1004",
+    "status": "completed",
+    "category": "Account access",
+    "order_id": null,
+    "product": null,
+    "urgency": "High",
+    "requested_action": "Reset my password"
+  },
+  {
+    "message_id": "T-1005",
+    "status": "completed",
+    "category": "Other",
+    "order_id": null,
+    "product": "Vista 4K Monitor",
+    "urgency": "Low",
+    "requested_action": "confirm delivery to Coimbatore"
+  },
+  {
+    "message_id": "T-1006",
+    "status": "completed",
+    "category": "Billing",
+    "order_id": "ORD-60318",
+    "product": null,
+    "urgency": "Low",
+    "requested_action": "Get a GST invoice"
+  },
+  {
+    "message_id": "T-1007",
+    "status": "completed",
+    "category": "Refund",
+    "order_id": "ORD-72215",
+    "product": "Orbit Smart Speaker",
+    "urgency": "High",
+    "requested_action": "Refund the extra payment"
+  },
+  {
+    "message_id": "T-1008",
+    "status": "completed",
+    "category": "Technical issue",
+    "order_id": null,
+    "product": "CloudSync Pro",
+    "urgency": "Medium",
+    "requested_action": "Fix the app crash when opening it"
+  },
+  {
+    "message_id": "T-1009",
+    "status": "completed",
+    "category": "Account access",
+    "order_id": null,
+    "product": null,
+    "urgency": "Medium",
+    "requested_action": "Change the email address linked to my account"
+  },
+  {
+    "message_id": "T-1010",
+    "status": "completed",
+    "category": "Other",
+    "order_id": null,
+    "product": "Glide Laptop Stand",
+    "urgency": "Low",
+    "requested_action": null
+  },
+  {
+    "message_id": "T-1011",
+    "status": "completed",
+    "category": "Other",
+    "order_id": "ORD-55102",
+    "product": null,
+    "urgency": "Low",
+    "requested_action": "sollunga"
+  },
+  {
+    "message_id": "T-1012",
+    "status": "rejected",
+    "category": null,
+    "order_id": null,
+    "product": null,
+    "urgency": null,
+    "requested_action": null
+  },
+  {
+    "message_id": "T-1013",
+    "status": "completed",
+    "category": "Technical issue",
+    "order_id": "ORD-61884",
+    "product": "Zen Air Purifier",
+    "urgency": "Medium",
+    "requested_action": "Address the loud rattling noise and refund the delivery fee"
+  },
+  {
+    "message_id": "T-1014",
+    "status": "completed",
+    "category": "Refund",
+    "order_id": "ORD-70563",
+    "product": "Glide Laptop Stand",
+    "urgency": "Medium",
+    "requested_action": "refund"
+  },
+  {
+    "message_id": "T-1015",
+    "status": "completed",
+    "category": "Billing",
+    "order_id": null,
+    "product": "CloudSync Pro",
+    "urgency": "Medium",
+    "requested_action": "Explain why I was charged for the auto-renewal of my CloudSync Pro subscription"
+  },
+  {
+    "message_id": "T-1016",
+    "status": "completed",
+    "category": "Account access",
+    "order_id": null,
+    "product": null,
+    "urgency": "High",
+    "requested_action": "lock my account"
+  },
+  {
+    "message_id": "T-1017",
+    "status": "completed",
+    "category": "Technical issue",
+    "order_id": "ORD-44731",
+    "product": "Vista 4K Monitor",
+    "urgency": "Low",
+    "requested_action": "Check if the flickering green line issue is covered under warranty"
+  },
+  {
+    "message_id": "T-1018",
+    "status": "completed",
+    "category": "Refund",
+    "order_id": "ORD-80456",
+    "product": null,
+    "urgency": "Medium",
+    "requested_action": "Know when I will get my refund"
+  },
+  {
+    "message_id": "T-1019",
+    "status": "completed",
+    "category": "Other",
+    "order_id": null,
+    "product": null,
+    "urgency": "Low",
+    "requested_action": "help"
+  },
+  {
+    "message_id": "T-1020",
+    "status": "completed",
+    "category": "Account access",
+    "order_id": null,
+    "product": null,
+    "urgency": "High",
+    "requested_action": "Help to unlock the account"
+  },
+  {
+    "message_id": "T-1021",
+    "status": "completed",
+    "category": "Billing",
+    "order_id": "ORD-30113",
+    "product": null,
+    "urgency": "Medium",
+    "requested_action": "Explain the second charge"
+  },
+  {
+    "message_id": "T-1022",
+    "status": "completed",
+    "category": "Technical issue",
+    "order_id": null,
+    "product": "Orbit Smart Speaker",
+    "urgency": "Low",
+    "requested_action": "connect to Bluetooth"
+  },
+  {
+    "message_id": "T-1023",
+    "status": "completed",
+    "category": "Other",
+    "order_id": null,
+    "product": "Aura Smart Watch",
+    "urgency": "Low",
+    "requested_action": "Information on plans for sleep tracking feature"
+  },
+  {
+    "message_id": "T-1024",
+    "status": "completed",
+    "category": "Refund",
+    "order_id": "ORD-90021",
+    "product": null,
+    "urgency": "High",
+    "requested_action": "Issue a refund"
+  }
+]

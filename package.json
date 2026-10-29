@@ -20,6 +20,8 @@
     "db:migrate": "npm run build -w @ticket-rpc/shared && node --env-file-if-exists=.env scripts/migrate.mjs",
     "dataset:submit": "node --env-file-if-exists=.env scripts/submit-dataset.mjs",
     "dataset:classify": "node --env-file-if-exists=.env scripts/classify-dataset.mjs",
+    "dataset:process": "node --env-file-if-exists=.env scripts/classify-dataset.mjs",
+    "results:export": "node --env-file-if-exists=.env scripts/results-export.mjs",
     "llm:smoke": "node --env-file-if-exists=.env --import tsx scripts/smoke-llm.ts",
     "pretest": "npm run build -w @ticket-rpc/shared",
     "test": "node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run",

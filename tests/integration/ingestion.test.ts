@@ -6,7 +6,11 @@ import request from "supertest";
 import { pool, runMigrations } from "@ticket-rpc/shared/database";
 import { app } from "../../apps/api/src/app.js";
 import { OpenAiCompatibleLlmClient } from "../../apps/worker/src/llm-client.js";
-import { classifyClaimedTicket, pollAndClaim } from "../../apps/worker/src/worker.js";
+import {
+  classifyClaimedTicket,
+  extractClaimedTicket,
+  pollAndClaim,
+} from "../../apps/worker/src/worker.js";
 import pino from "pino";
 
 const prefix = `it-${randomUUID()}-`;
@@ -392,7 +396,268 @@ describe("ticket ingestion with PostgreSQL", () => {
       [`${fixturePrefix}T-1007`],
     );
     expect(duplicateClassification.rows[0].count).toBe(1);
+
+    const extractionClaims = await pollAndClaim(pool, {
+      concurrency: 32,
+      leaseMs: 60_000,
+      messageIdPrefix: fixturePrefix,
+    });
+    expect(extractionClaims.claimed).toHaveLength(23);
+    expect(extractionClaims.claimed.every((ticket) =>
+      ticket.classification_status === "completed" &&
+      ticket.extraction_status === "pending" &&
+      Boolean(ticket.classification_category),
+    )).toBe(true);
+    const extractionCalls = { calls: 0 };
+    const extractionLlm = await startLlm(
+      200,
+      '{"order_id":null,"product":null,"urgency":"Low","requested_action":null}',
+      extractionCalls,
+    );
+    await Promise.all(
+      extractionClaims.claimed.map((ticket) =>
+        extractClaimedTicket(
+          pool,
+          extractionLlm,
+          ticket,
+          { maxAttempts: 3, retryBaseMs: 1, retryMaxMs: 5, leaseMs: 60_000 },
+          logger,
+        ),
+      ),
+    );
+    expect(extractionCalls.calls).toBe(23);
+    const extractedFixture = await pool.query(
+      `SELECT t.message_id, t.status, c.status AS classification_status,
+              c.category, x.status AS extraction_status, x.order_id, x.product,
+              x.urgency, x.requested_action
+       FROM tickets t
+       LEFT JOIN ticket_classifications c ON c.ticket_id = t.id
+       LEFT JOIN ticket_extractions x ON x.ticket_id = t.id
+       WHERE t.message_id LIKE $1`,
+      [`${fixturePrefix}%`],
+    );
+    expect(extractedFixture.rows.filter((ticket) => ticket.status === "completed")).toHaveLength(23);
+    expect(extractedFixture.rows.every((ticket) =>
+      ticket.status === "rejected" ||
+      (ticket.classification_status === "completed" &&
+        ticket.extraction_status === "completed" &&
+        ticket.urgency === "Low" &&
+        ticket.order_id === null &&
+        ticket.product === null &&
+        ticket.requested_action === null),
+    )).toBe(true);
+    const duplicateExtraction = await pool.query(
+      `SELECT count(a.id)::int AS count FROM tickets t
+       JOIN extraction_attempts a ON a.ticket_id = t.id
+       WHERE t.message_id = $1`,
+      [`${fixturePrefix}T-1007`],
+    );
+    expect(duplicateExtraction.rows[0].count).toBe(1);
   }, 20_000);
+
+  it("retries extraction failures without repeating classification and supports operator retry", async () => {
+    const messageId = id("extract-retry");
+    await request(app).post("/api/v1/tickets").send({
+      message_id: messageId,
+      text: "My Aura Watch order ORD-48213 was charged incorrectly.",
+    });
+    const classificationCalls = { calls: 0 };
+    const classificationLlm = await startLlm(
+      200,
+      '{"category":"Billing"}',
+      classificationCalls,
+    );
+    const initialClaim = await pollAndClaim(pool, {
+      concurrency: 1,
+      leaseMs: 60_000,
+      messageIdPrefix: messageId,
+    });
+    await classifyClaimedTicket(
+      pool,
+      classificationLlm,
+      initialClaim.claimed[0]!,
+      { maxAttempts: 3, retryBaseMs: 1, retryMaxMs: 5, leaseMs: 60_000 },
+      logger,
+    );
+
+    const invalidCalls = { calls: 0 };
+    const invalidLlm = await startLlm(
+      200,
+      '{"order_id":null,"product":"Unknown device","urgency":"Low","requested_action":null}',
+      invalidCalls,
+    );
+    for (let failure = 0; failure < 3; failure += 1) {
+      const claim = await pollAndClaim(pool, {
+        concurrency: 1,
+        leaseMs: 60_000,
+        messageIdPrefix: messageId,
+      });
+      expect(claim.claimed).toHaveLength(1);
+      expect(claim.claimed[0]?.classification_status).toBe("completed");
+      await extractClaimedTicket(
+        pool,
+        invalidLlm,
+        claim.claimed[0]!,
+        { maxAttempts: 3, retryBaseMs: 1, retryMaxMs: 5, leaseMs: 60_000 },
+        logger,
+      );
+      await pool.query(
+        `UPDATE ticket_extractions SET next_attempt_at = now()
+         WHERE ticket_id = (SELECT id FROM tickets WHERE message_id = $1)`,
+        [messageId],
+      );
+    }
+
+    expect(invalidCalls.calls).toBe(3);
+    const failed = await pool.query(
+      `SELECT t.status, c.status AS classification_status,
+              c.llm_calls AS classification_calls,
+              x.status AS extraction_status, x.attempts, x.llm_calls,
+              x.last_error
+       FROM tickets t
+       JOIN ticket_classifications c ON c.ticket_id = t.id
+       JOIN ticket_extractions x ON x.ticket_id = t.id
+       WHERE t.message_id = $1`,
+      [messageId],
+    );
+    expect(failed.rows[0]).toMatchObject({
+      status: "failed",
+      classification_status: "completed",
+      classification_calls: 1,
+      extraction_status: "failed",
+      attempts: 3,
+      llm_calls: 3,
+    });
+    expect(failed.rows[0].last_error).toContain("unknown product");
+
+    expect((await request(app).post(`/api/v1/tickets/${messageId}/retry`)).status).toBe(202);
+    const retryClaim = await pollAndClaim(pool, {
+      concurrency: 1,
+      leaseMs: 60_000,
+      messageIdPrefix: messageId,
+    });
+    expect(retryClaim.claimed).toHaveLength(1);
+    expect(retryClaim.claimed[0]?.classification_status).toBe("completed");
+    const successfulCalls = { calls: 0 };
+    const successfulLlm = await startLlm(
+      200,
+      '{"order_id":"ORD-48213","product":"Aura Smart Watch","urgency":"Medium","requested_action":"Correct the charge"}',
+      successfulCalls,
+    );
+    await extractClaimedTicket(
+      pool,
+      successfulLlm,
+      retryClaim.claimed[0]!,
+      { maxAttempts: 3, retryBaseMs: 1, retryMaxMs: 5, leaseMs: 60_000 },
+      logger,
+    );
+    expect(classificationCalls.calls).toBe(1);
+    expect(successfulCalls.calls).toBe(1);
+
+    const completed = await pool.query(
+      `SELECT t.status, c.status AS classification_status, c.category,
+              c.llm_calls AS classification_calls,
+              x.status AS extraction_status, x.order_id, x.product,
+              x.urgency, x.requested_action, x.attempts, x.llm_calls
+       FROM tickets t
+       JOIN ticket_classifications c ON c.ticket_id = t.id
+       JOIN ticket_extractions x ON x.ticket_id = t.id
+       WHERE t.message_id = $1`,
+      [messageId],
+    );
+    expect(completed.rows[0]).toEqual({
+      status: "completed",
+      classification_status: "completed",
+      category: "Billing",
+      classification_calls: 1,
+      extraction_status: "completed",
+      order_id: "ORD-48213",
+      product: "Aura Smart Watch",
+      urgency: "Medium",
+      requested_action: "Correct the charge",
+      attempts: 1,
+      llm_calls: 4,
+    });
+  });
+
+  it("serializes concurrent extraction claims and recovers an expired extraction lease", async () => {
+    const messageId = id("extract-recovery");
+    await request(app).post("/api/v1/tickets").send({
+      message_id: messageId,
+      text: "My Pulse Earbuds keep disconnecting.",
+    });
+    const classificationLlm = await startLlm(200, '{"category":"Technical issue"}', { calls: 0 });
+    const classificationClaim = await pollAndClaim(pool, {
+      concurrency: 1,
+      leaseMs: 60_000,
+      messageIdPrefix: messageId,
+    });
+    await classifyClaimedTicket(
+      pool,
+      classificationLlm,
+      classificationClaim.claimed[0]!,
+      { maxAttempts: 3, retryBaseMs: 1, retryMaxMs: 5, leaseMs: 60_000 },
+      logger,
+    );
+
+    const [first, second] = await Promise.all([
+      pollAndClaim(pool, { concurrency: 1, leaseMs: 60_000, messageIdPrefix: messageId }),
+      pollAndClaim(pool, { concurrency: 1, leaseMs: 60_000, messageIdPrefix: messageId }),
+    ]);
+    const claimed = [...first.claimed, ...second.claimed];
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]?.classification_status).toBe("completed");
+
+    await pool.query(
+      `UPDATE ticket_extractions SET status = 'in_progress', attempts = 1, llm_calls = 1
+       WHERE ticket_id = (SELECT id FROM tickets WHERE message_id = $1)`,
+      [messageId],
+    );
+    await pool.query(
+      `INSERT INTO extraction_attempts (ticket_id, call_number, status)
+       SELECT id, 1, 'started' FROM tickets WHERE message_id = $1`,
+      [messageId],
+    );
+    await pool.query(
+      `UPDATE tickets SET lease_expires_at = now() - interval '1 second'
+       WHERE message_id = $1`,
+      [messageId],
+    );
+    const recovery = await pollAndClaim(pool, {
+      concurrency: 1,
+      leaseMs: 60_000,
+      messageIdPrefix: messageId,
+    });
+    expect(recovery.recovered.map((ticket) => ticket.message_id)).toContain(messageId);
+    expect(recovery.claimed).toHaveLength(1);
+    expect(recovery.claimed[0]?.classification_status).toBe("completed");
+    const calls = { calls: 0 };
+    const llm = await startLlm(
+      200,
+      '{"order_id":null,"product":"Pulse Earbuds","urgency":"Medium","requested_action":"Repair or replace the earbuds"}',
+      calls,
+    );
+    await extractClaimedTicket(
+      pool,
+      llm,
+      recovery.claimed[0]!,
+      { maxAttempts: 3, retryBaseMs: 1, retryMaxMs: 5, leaseMs: 60_000 },
+      logger,
+    );
+    expect(calls.calls).toBe(1);
+    expect((await pool.query(
+      `SELECT t.status, c.llm_calls AS classification_calls,
+              x.status AS extraction_status, x.llm_calls AS extraction_calls
+       FROM tickets t JOIN ticket_classifications c ON c.ticket_id = t.id
+       JOIN ticket_extractions x ON x.ticket_id = t.id WHERE t.message_id = $1`,
+      [messageId],
+    )).rows[0]).toEqual({
+      status: "completed",
+      classification_calls: 1,
+      extraction_status: "completed",
+      extraction_calls: 2,
+    });
+  });
 
   it("fails after three invalid LLM responses and operator retry re-enables classification", async () => {
     const messageId = id("classify-retry");

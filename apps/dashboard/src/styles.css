@@ -43,6 +43,11 @@ button:disabled { opacity: .45; cursor: default; }
 .ticket-meta { justify-content: flex-start; flex-wrap: wrap; color: #75827b; font-size: 11px; }
 .classification { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin: 0 0 10px; color: #52635a; font-size: 12px; }
 .classification .reason { flex-basis: 100%; }
+.extraction { display: grid; gap: 9px; margin: 12px 0; padding: 12px; border-radius: 8px; background: #f7f9f7; }
+.extraction-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
+.extraction-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; color: #52635a; font-size: 12px; }
+.extraction-fields span:last-of-type { overflow-wrap: anywhere; }
+.extraction .reason { margin: 0; }
 .llm-status { text-align: right; }
 .event { display: grid; grid-template-columns: 1fr 1fr 2fr 1.3fr; gap: 12px; padding: 10px 0; border-top: 1px solid #edf0ed; font-size: 12px; }
 .event time { color: #75827b; }
