@@ -7,9 +7,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently --kill-others -n api,worker,dashboard \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:dashboard\"",
-    "dev:api": "npm run dev -w @ticket-rpc/api",
-    "dev:worker": "npm run dev -w @ticket-rpc/worker",
+    "dev": "npm run build -w @ticket-rpc/shared && concurrently --kill-others -n api,worker,dashboard \"npm run dev -w @ticket-rpc/api\" \"npm run dev -w @ticket-rpc/worker\" \"npm run dev -w @ticket-rpc/dashboard\"",
+    "dev:api": "npm run build -w @ticket-rpc/shared && npm run dev -w @ticket-rpc/api",
+    "dev:worker": "npm run build -w @ticket-rpc/shared && npm run dev -w @ticket-rpc/worker",
     "dev:dashboard": "npm run dev -w @ticket-rpc/dashboard",
     "build": "npm run build:backend && npm run build -w @ticket-rpc/dashboard",
     "build:backend": "npm run build -w @ticket-rpc/shared && npm run build -w @ticket-rpc/api && npm run build -w @ticket-rpc/worker",
