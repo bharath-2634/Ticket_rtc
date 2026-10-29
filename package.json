@@ -17,7 +17,10 @@
     "docker:setup": "node scripts/docker-setup.mjs",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
-    "test": "vitest run",
+    "db:migrate": "npm run build -w @ticket-rpc/shared && node --env-file-if-exists=.env scripts/migrate.mjs",
+    "dataset:submit": "node --env-file-if-exists=.env scripts/submit-dataset.mjs",
+    "pretest": "npm run build -w @ticket-rpc/shared",
+    "test": "node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run",
     "test:watch": "vitest"
   },
   "devDependencies": {

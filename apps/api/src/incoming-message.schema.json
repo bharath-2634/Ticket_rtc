@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Incoming customer message",
+  "type": "object",
+  "required": [
+    "message_id",
+    "text"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "description": "Unique ID of the message. If the same message is sent again, it keeps the same message_id."
+    },
+    "text": {
+      "type": "string",
+      "description": "The customer's message exactly as received. May be empty."
+    }
+  }
+}

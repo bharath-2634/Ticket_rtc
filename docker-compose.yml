@@ -25,13 +25,20 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       API_PORT: ${API_PORT:-3000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ticket_rpc}:${POSTGRES_PASSWORD:-ticket_rpc_dev}@postgres:5432/${POSTGRES_DB:-ticket_rpc}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-30000}
+      DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:-5000}
+      MAX_REQUEST_BODY_SIZE: ${MAX_REQUEST_BODY_SIZE:-1mb}
+      MAX_TICKET_TEXT_LENGTH: ${MAX_TICKET_TEXT_LENGTH:-100000}
+      DASHBOARD_ORIGIN: ${DASHBOARD_ORIGIN:-http://localhost:5173}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${API_PORT:-3000}:${API_PORT:-3000}"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + process.env.API_PORT + '/health/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + process.env.API_PORT + '/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,6 +53,15 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ticket_rpc}:${POSTGRES_PASSWORD:-ticket_rpc_dev}@postgres:5432/${POSTGRES_DB:-ticket_rpc}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-30000}
+      DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:-5000}
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-1000}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      WORKER_PROCESSING_LEASE_MS: ${WORKER_PROCESSING_LEASE_MS:-60000}
+      DB_RETRY_BASE_MS: ${DB_RETRY_BASE_MS:-500}
+      DB_RETRY_MAX_MS: ${DB_RETRY_MAX_MS:-30000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
         condition: service_healthy
